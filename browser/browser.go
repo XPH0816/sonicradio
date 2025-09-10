@@ -168,6 +168,45 @@ func (a *Api) stationSearch(s SearchParams) ([]Station, error) {
 			a.stationsMtx.Unlock()
 			log.Info("stations cache set")
 		}
+		stations = append([]Station{
+			{
+				Changeuuid:    "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+				Stationuuid:   "240e34c4-1d98-5336-a9cc-24dfb5040edd",
+				Serveruuid:    "240e34c4-1d98-5336-a9cc-24dfb5040edd",
+				Name:          "RefNet America TimeZone",
+				URL:           "https://icecast.refnet.fm/utc/-0400",
+				Country:       "The United States Of America",
+				Countrycode:   "US",
+				ISO3166_2:     "US-PA",
+				Codec:         "MP3",
+				Homepage:      "https://www.refnet.fm",
+				Language:      "english",
+				Languagecodes: "en",
+				Bitrate:       320,
+				Votes:         1013138,
+				Clickcount:    2013,
+				Tags:          "24-Hour Internet Radio Committed To the Historic Christian Faith",
+				State:         "Pennsylvania",
+			},
+			{
+				Changeuuid:    "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+				Stationuuid:   "3ef18929-3da8-5897-be22-19e895920a90",
+				Serveruuid:    "3ef18929-3da8-5897-be22-19e895920a90",
+				Name:          "RefNet Malaysia TimeZone",
+				URL:           "https://icecast.refnet.fm/utc/+0800",
+				Country:       "Malaysia",
+				Countrycode:   "MY",
+				Codec:         "MP3",
+				Homepage:      "https://www.refnet.fm",
+				Language:      "english",
+				Languagecodes: "en",
+				Bitrate:       320,
+				Votes:         1013138,
+				Clickcount:    2032,
+				Tags:          "24-Hour Internet Radio Committed To the Historic Christian Faith",
+				State:         "Johor",
+			},
+		}, stations...)
 		return stations, nil
 	}
 	log.Warn("exceeded max retries")
@@ -203,6 +242,45 @@ func (a *Api) GetStations(uuids []string) ([]Station, error) {
 			time.Sleep(serverRetryMillis * time.Millisecond)
 			continue
 		}
+		stations = append([]Station{
+			{
+				Changeuuid:    "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+				Stationuuid:   "240e34c4-1d98-5336-a9cc-24dfb5040edd",
+				Serveruuid:    "240e34c4-1d98-5336-a9cc-24dfb5040edd",
+				Name:          "RefNet America TimeZone",
+				URL:           "https://icecast.refnet.fm/utc/-0400",
+				Country:       "The United States Of America",
+				Countrycode:   "US",
+				ISO3166_2:     "US-PA",
+				Codec:         "MP3",
+				Homepage:      "https://www.refnet.fm",
+				Language:      "english",
+				Languagecodes: "en",
+				Bitrate:       320,
+				Votes:         1013138,
+				Clickcount:    2013,
+				Tags:          "24-Hour Internet Radio Committed To the Historic Christian Faith",
+				State:         "Pennsylvania",
+			},
+			{
+				Changeuuid:    "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+				Stationuuid:   "3ef18929-3da8-5897-be22-19e895920a90",
+				Serveruuid:    "3ef18929-3da8-5897-be22-19e895920a90",
+				Name:          "RefNet Malaysia TimeZone",
+				URL:           "https://icecast.refnet.fm/utc/+0800",
+				Country:       "Malaysia",
+				Countrycode:   "MY",
+				Codec:         "MP3",
+				Homepage:      "https://www.refnet.fm",
+				Language:      "english",
+				Languagecodes: "en",
+				Bitrate:       320,
+				Votes:         1013138,
+				Clickcount:    2032,
+				Tags:          "24-Hour Internet Radio Committed To the Historic Christian Faith",
+				State:         "Johor",
+			},
+		}, stations...)
 		log.Info("", "length", len(stations))
 		return stations, nil
 	}
