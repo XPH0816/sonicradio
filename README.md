@@ -46,7 +46,7 @@ Available options:
 | Key(s)      |                Action |
 | :---------- | --------------------: |
 | ↑/k         |                    up |
-| │↓/j        |                  down |
+| ↓/j         |                  down |
 | ctrl+f/pgdn |             next page |
 | ctrl+b/pgup |             prev page |
 | g/home      |           go to start |
@@ -72,13 +72,6 @@ Available options:
 | ?           |           toggle help |
 | q           |                  quit |
 
-## TODO
-
-- [x] Search stations section
-- [x] Display rich station information
-- [x] Playback history tab
-- [x] Settings tab
-- [x] Standalone mode
 
 ## License
 
