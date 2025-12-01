@@ -1,21 +1,29 @@
 package ui
 
 import (
+	"slices"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/dancnb/sonicradio/browser"
+	"github.com/dancnb/sonicradio/config"
+	"github.com/dancnb/sonicradio/model"
 )
 
 type favoritesTab struct {
 	stationsTabBase
+	customStationModel *customStationModel
+	cfg                *config.Value
 }
 
-func newFavoritesTab(infoModel *infoModel, s *Style) *favoritesTab {
+func newFavoritesTab(cfg *config.Value, infoModel *infoModel, browser *browser.API, s *Style) *favoritesTab {
 	k := newListKeymap()
 
 	m := &favoritesTab{
-		stationsTabBase: newStationsTab(k, infoModel, s),
+		stationsTabBase:    newStationsTab(k, infoModel, s),
+		customStationModel: newCustomStationModel(browser, s),
+		cfg:                cfg,
 	}
 	return m
 }
@@ -23,7 +31,7 @@ func newFavoritesTab(infoModel *infoModel, s *Style) *favoritesTab {
 func (t *favoritesTab) createList(delegate *stationDelegate, width int, height int) list.Model {
 	l := createList(delegate, width, height)
 	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{t.listKeymap.search}
+		return []key.Binding{t.listKeymap.search, t.listKeymap.addCustomFavorite}
 	}
 	l.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
@@ -36,6 +44,7 @@ func (t *favoritesTab) createList(delegate *stationDelegate, width int, height i
 			t.listKeymap.historyTab,
 			t.listKeymap.settingsTab,
 			t.listKeymap.stationView,
+			t.listKeymap.addCustomFavorite,
 		}
 	}
 
@@ -61,6 +70,14 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		im, cmd := t.infoModel.Update(infoModelMsg)
 		t.infoModel = im
 		cmds = append(cmds, cmd)
+	} else if t.IsCustomStationEnabled() {
+		customStationModelMsg := msg
+		if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
+			customStationModelMsg = t.newSizeMsg(sizeMsg, m)
+		}
+		sm, cmd := t.customStationModel.Update(customStationModelMsg)
+		t.customStationModel = sm.(*customStationModel)
+		cmds = append(cmds, cmd)
 	}
 
 	switch msg := msg.(type) {
@@ -71,42 +88,40 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case favoritesStationRespMsg:
 		t.viewMsg = string(msg.viewMsg)
 		items := make([]list.Item, 0)
-		var autoplayUuid *browser.Station
+		var autoplayUUID *model.Station
 		var autoplayIdx int
-		var notFound []string
-		for j := 0; j < len(m.cfg.Favorites); j++ {
-			found := false
-			for i := 0; i < len(msg.stations); i++ {
-				if msg.stations[i].Stationuuid == m.cfg.Favorites[j] {
-					items = append(items, msg.stations[i])
 
-					if m.cfg.AutoplayFavorite == msg.stations[i].Stationuuid {
-						autoplayUuid = &msg.stations[i]
-						autoplayIdx = len(items) - 1
-					}
-
-					found = true
-					break
-				}
-			}
-			if !found {
-				notFound = append(notFound, m.cfg.Favorites[j])
+		for i := range msg.stations {
+			items = append(items, msg.stations[i])
+			if m.cfg.AutoplayFavorite == msg.stations[i].Stationuuid {
+				autoplayUUID = &msg.stations[i]
+				autoplayIdx = len(items) - 1
 			}
 		}
+
+		favoritesV1 := m.cfg.GetFavoritesV1()
+		notAllfound := false
+		for j := range favoritesV1 {
+			notAllfound = notAllfound || !slices.ContainsFunc(
+				msg.stations,
+				func(el model.Station) bool { return el.Stationuuid == favoritesV1[j] },
+			)
+		}
+
 		sm := msg.statusMsg
-		if sm == "" && len(notFound) > 0 {
+		if sm == "" && notAllfound {
 			sm = statusMsg(missingFavorites)
 		}
 		m.updateStatus(string(sm))
 		cmd := t.list.SetItems(items)
 		cmds = append(cmds, cmd)
-		if autoplayUuid != nil {
+		if autoplayUUID != nil {
 			t.list.Select(autoplayIdx)
-			cmds = append(cmds, m.playStationCmd(*autoplayUuid))
+			cmds = append(cmds, m.playStationCmd(*autoplayUUID))
 		}
 
 	case playHistoryEntryMsg:
-		s, idx := t.getListStationByUuid(msg.uuid)
+		s, idx := t.getListStationByUUID(msg.uuid)
 		if s != nil {
 			t.list.Select(*idx)
 			return m, m.playStationCmd(*s)
@@ -119,7 +134,7 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			its := t.list.Items()
 			for i := range its {
-				s := its[i].(browser.Station)
+				s := its[i].(model.Station)
 				if s.Stationuuid == msg.station.Stationuuid {
 					t.list.RemoveItem(i)
 					break
@@ -131,6 +146,17 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.viewMsg = noFavoritesAddedMsg
 		}
 
+	case customStationRespMsg:
+		t.listKeymap.setEnabled(true)
+		if msg.cancelled || msg.station == nil {
+			// do nothing, no new custom station
+		} else {
+			// add new custom station to favorites
+			t.cfg.AddFavorite(*msg.station)
+			cmd := t.list.InsertItem(len(t.list.Items()), *msg.station)
+			cmds = append(cmds, cmd)
+		}
+
 	case toggleInfoMsg:
 		if msg.enable {
 			cmds = append(cmds, t.initInfoModel(m, msg))
@@ -140,7 +166,7 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		if t.IsInfoEnabled() {
+		if t.IsInfoEnabled() || t.IsCustomStationEnabled() {
 			return m, tea.Batch(cmds...)
 		}
 
@@ -159,14 +185,20 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, t.list.KeyMap.Quit, t.list.KeyMap.ForceQuit):
 			return m, tea.Quit
 
+		case key.Matches(msg, t.listKeymap.addCustomFavorite):
+			t.listKeymap.setEnabled(false)
+			t.customStationModel.setSize(m.width, m.totHeight-m.headerHeight)
+			cmds = append(cmds, t.customStationModel.Init())
+			return m, tea.Batch(cmds...)
+
 		case key.Matches(msg, m.delegate.keymap.delete):
-			selStation, ok := t.list.SelectedItem().(browser.Station)
+			selStation, ok := t.list.SelectedItem().(model.Station)
 			if !ok {
 				break
 			}
-			m.cfg.DeleteFavorite(selStation.Stationuuid)
+			m.cfg.DeleteFavorite(selStation)
 			t.viewMsg = ""
-			if len(m.cfg.Favorites) == 0 {
+			if !m.cfg.HasFavorites() {
 				t.viewMsg = noFavoritesAddedMsg
 			}
 
@@ -175,11 +207,11 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			idx := t.list.Index()
-			if len(m.cfg.Favorites) > 0 {
+			if m.cfg.HasFavorites() {
 				idx++
 			}
-			m.cfg.InsertFavorite(m.delegate.deleted.Stationuuid, idx)
-			if len(m.cfg.Favorites) > 0 {
+			m.cfg.InsertFavorite(*m.delegate.deleted, idx)
+			if m.cfg.HasFavorites() {
 				t.viewMsg = ""
 			}
 
@@ -188,8 +220,8 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			idx := t.list.Index()
-			m.cfg.InsertFavorite(m.delegate.deleted.Stationuuid, idx)
-			if len(m.cfg.Favorites) > 0 {
+			m.cfg.InsertFavorite(*m.delegate.deleted, idx)
+			if m.cfg.HasFavorites() {
 				t.viewMsg = ""
 			}
 
@@ -224,6 +256,12 @@ func (t *favoritesTab) Update(m *Model, msg tea.Msg) (tea.Model, tea.Cmd) {
 func (t *favoritesTab) View() string {
 	if t.IsInfoEnabled() {
 		return t.infoModel.View()
+	} else if t.IsCustomStationEnabled() {
+		return t.customStationModel.View()
 	}
 	return t.stationsTabBase.View()
+}
+
+func (t *favoritesTab) IsCustomStationEnabled() bool {
+	return t.customStationModel != nil && t.customStationModel.isEnabled()
 }

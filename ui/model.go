@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dancnb/sonicradio/browser"
 	"github.com/dancnb/sonicradio/config"
+	"github.com/dancnb/sonicradio/model"
 	"github.com/dancnb/sonicradio/player"
 )
 
@@ -33,7 +34,7 @@ const (
 
 	// header status
 	noPlayingMsg     = "Nothing playing"
-	missingFavorites = "Some stations not found"
+	missingFavorites = "Some stations were not found"
 	prevTermErr      = "Could not terminate previous playback!"
 	voteSuccesful    = "Station was voted successfully"
 	statusMsgTimeout = 1 * time.Second
@@ -43,7 +44,7 @@ const (
 	playerPollInterval = 500 * time.Millisecond
 )
 
-func NewModel(ctx context.Context, cfg *config.Value, b *browser.Api, p *player.Player) *Model {
+func NewModel(ctx context.Context, cfg *config.Value, b *browser.API, p *player.Player) *Model {
 	m := newModel(ctx, cfg, b, p)
 	progr := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
 	m.Progr = progr
@@ -52,7 +53,7 @@ func NewModel(ctx context.Context, cfg *config.Value, b *browser.Api, p *player.
 	return m
 }
 
-func newModel(ctx context.Context, cfg *config.Value, b *browser.Api, p *player.Player) *Model {
+func newModel(ctx context.Context, cfg *config.Value, b *browser.API, p *player.Player) *Model {
 	style := NewStyle(cfg.Theme)
 
 	delegate := newStationDelegate(cfg, style, p, b)
@@ -69,13 +70,13 @@ func newModel(ctx context.Context, cfg *config.Value, b *browser.Api, p *player.
 		volumeBar: getVolumeBar(style.GetSecondColor()),
 	}
 	m.tabs = []uiTab{
-		newFavoritesTab(infoModel, style),
+		newFavoritesTab(cfg, infoModel, b, style),
 		newBrowseTab(ctx, b, infoModel, style),
 		newHistoryTab(ctx, cfg, style),
 		newSettingsTab(ctx, cfg, style, p.AvailablePlayerTypes(), m.changeTheme),
 	}
 
-	if len(cfg.Favorites) > 0 {
+	if cfg.HasFavorites() || cfg.HasFavoritesV1() {
 		m.toFavoritesTab()
 	} else {
 		m.toBrowseTab()
@@ -133,7 +134,7 @@ type Model struct {
 	ready    bool
 	cfg      *config.Value
 	style    *Style
-	browser  *browser.Api
+	browser  *browser.API
 	player   *player.Player
 	delegate *stationDelegate
 
@@ -197,7 +198,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case metadataMsg:
 		go m.cfg.AddHistoryEntry(
 			time.Now(),
-			strings.TrimSpace(msg.stationUuid),
+			strings.TrimSpace(msg.stationUUID),
 			strings.TrimSpace(msg.stationName),
 			strings.TrimSpace(msg.songTitle),
 		)
@@ -221,6 +222,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	//
 	case topStationsRespMsg, searchRespMsg:
 		return m.tabs[browseTabIx].Update(m, msg)
+
+	case customStationRespMsg:
+		return m.tabs[favoriteTabIx].Update(m, msg)
 
 	case favoritesStationRespMsg:
 		return m.tabs[favoriteTabIx].Update(m, msg)
@@ -249,7 +253,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		} else if activeTab, ok := activeTab.(filteringTab); ok && activeTab.IsFiltering() {
 			break
-		} else if activeTab, ok := activeTab.(stationTab); ok && (activeTab.IsSearchEnabled() || activeTab.IsFiltering()) {
+		} else if activeTab, ok := activeTab.(stationTab); ok &&
+			(activeTab.IsSearchEnabled() || activeTab.IsFiltering() || activeTab.IsCustomStationEnabled()) {
 			break
 		}
 
@@ -286,7 +291,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				break
 			}
-			selStation, ok := activeTab.Stations().list.SelectedItem().(browser.Station)
+			selStation, ok := activeTab.Stations().list.SelectedItem().(model.Station)
 			if ok {
 				return m, m.playStationCmd(selStation)
 			}
@@ -305,7 +310,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				break
 			}
-			selStation, ok := activeTab.Stations().list.SelectedItem().(browser.Station)
+			selStation, ok := activeTab.Stations().list.SelectedItem().(model.Station)
 			if ok {
 				return m, m.playStationCmd(selStation)
 			}
@@ -398,14 +403,7 @@ func (m *Model) Quit() {
 	}
 
 	// save config
-	autoplayFound := false
-	for _, v := range m.cfg.Favorites {
-		if v == m.cfg.AutoplayFavorite {
-			autoplayFound = true
-			break
-		}
-	}
-	if !autoplayFound {
+	if !m.cfg.IsFavorite(m.cfg.AutoplayFavorite) {
 		m.cfg.AutoplayFavorite = ""
 	}
 	st := m.tabs[settingsTabIx].(*settingsTab)
@@ -625,12 +623,19 @@ func (m *Model) changeTheme(themeIdx int) {
 			t.Stations().infoModel.help.Styles = helpStyle
 
 			if browse, ok := t.(*browseTab); ok {
-				for iIdx := range browse.searchModel.inputs {
-					input := browse.searchModel.inputs[iIdx].TextInput()
+				for iIdx := range browse.searchModel.textInputs {
+					input := browse.searchModel.textInputs[iIdx].TextInput()
 					m.style.TextInputSyle(input, input.Prompt, input.Placeholder)
 					input.PromptStyle = m.style.PromptStyle
 				}
 				browse.searchModel.help.Styles = helpStyle
+			} else if favorites, ok := t.(*favoritesTab); ok {
+				for iIdx := range favorites.customStationModel.textInputs {
+					input := favorites.customStationModel.textInputs[iIdx].TextInput()
+					m.style.TextInputSyle(input, input.Prompt, input.Placeholder)
+					input.PromptStyle = m.style.PromptStyle
+				}
+				favorites.customStationModel.help.Styles = helpStyle
 			}
 
 		} else if ht, ok := m.tabs[i].(*historyTab); ok {
@@ -667,7 +672,7 @@ func trapSignal(p *tea.Program) {
 func logTeaMsg(msg tea.Msg, tag string) {
 	log := slog.With("method", tag)
 	switch msg.(type) {
-	case favoritesStationRespMsg, topStationsRespMsg, searchRespMsg, toggleInfoMsg:
+	case favoritesStationRespMsg, topStationsRespMsg, searchRespMsg, customStationRespMsg, toggleInfoMsg:
 		log.Info("tea.Msg", "type", fmt.Sprintf("%T", msg))
 	case cursor.BlinkMsg, spinner.TickMsg, list.FilterMatchesMsg:
 		break
